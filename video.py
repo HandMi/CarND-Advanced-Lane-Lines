@@ -22,13 +22,14 @@ vertices = np.float32([[[287,670],[583,458],[701,458],[1031,670]]])
 destination = np.float32([[[300,700],[300,20],[980,20],[980,700]]])
 
 n=8
+# Calibrate the warp matrix for perspective transforms
 lane_detector.calibrate_warp(vertices,destination)
 lane_detector.reset_lanes()
 
 
 output = 'harder_challenge_video_processed.mp4'
 clip1 = VideoFileClip("harder_challenge_video.mp4")
-clip = clip1.fl_image(lane_detector.image_pipeline) #NOTE: this function expects color images!!
+clip = clip1.fl_image(lane_detector.image_pipeline)
 clip.write_videofile(output, audio=False)
 clip1.reader.close()
 clip1.close()

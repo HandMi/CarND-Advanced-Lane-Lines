@@ -9,12 +9,14 @@ def gaussian_blur(img, kernel_size):
     """Applies a Gaussian Noise kernel"""
     return cv2.GaussianBlur(img, (kernel_size, kernel_size), 0)   
 
+# instead of taking the maximum of the histogram we would like to take the median 
 def argmedian(hist):
     total_sum = np.sum(hist)
     cumulative_sum = np.cumsum(hist)
     argmed = np.argmin(np.abs(cumulative_sum-total_sum//2))
     return argmed
 
+# Identify valid lane pixels based on a sliding windows search
 def find_lane_pixels(binary_warped):
     # Take a histogram of the bottom half of the image
     histogram = np.sum(binary_warped[binary_warped.shape[0]//2:,:], axis=0)
@@ -86,24 +88,29 @@ def find_lane_pixels(binary_warped):
 
 
 
-
+# Lane detection class
 class lane_detection:
     
+    # Initialize by calibrating the lane_detection to the specific camera in use
     def __init__(self, img, objpoints, imgpoints):
        self.reset_lanes()
        ret, self.undist_mtx, self.dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, img.shape[1:], None, None)
 
+    # Reset the lanes
     def reset_lanes(self):
        self.lane_left = lane.lane()
        self.lane_right = lane.lane()
 
+    # Calibrate the warp matrix
     def calibrate_warp(self, vertices, destination):
        self.warp_matrix = cv2.getPerspectiveTransform(vertices, destination)
 
+    # Undistort the image
     def undistort(self,img):
        undist = cv2.undistort(img, self.undist_mtx, self.dist_coeffs, None, self.undist_mtx)
        return undist
 
+    # Apply a Sobel filter to the image
     def apply_sobel(self, img, sobel_kernel=3, sob_thresh=(0, 255), mag_thresh=(0, 255), dir_thresh=(0, np.pi/2)):
         # Take both Sobel x and y gradients
         sobel_x = cv2.Sobel(img, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
@@ -146,15 +153,18 @@ class lane_detection:
         bin_combined[((binary_x == 1) & (binary_y == 1)) | ((binary_mag == 1) & (binary_dir == 1))] = 1
         return bin_combined
 
+    
     def sobel_filter(self, img):
         ret = self.apply_sobel(img, params.SOBEL_KERNEL_SIZE, params.SOBEL_THRESHOLD, params.MAGNITUDE_THRESHOLD, params.DIRECTIONAL_THRESHOLD)
         return ret*255
 
+    # Grayscale is computed from a the HLS-S and RGB-R channel of the original image
     def grayscale(self, img):
         hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
         ret = cv2.addWeighted(hls[:,:,2],0.5,img[:,:,0],0.5,0)
         return hls[:,:,2]
 
+    # HSV Color filter filters for white and yellowish pixels
     def hsv_color_filter(self, img):
        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
        image_yellow = cv2.inRange(hsv, params.dark_yellow, params.light_yellow)
@@ -162,13 +172,14 @@ class lane_detection:
        ret_image = image_white+image_yellow
        return ret_image
 
-
+    # Fit polynomials onto pixel found by a sliding window search
     def fit_polynomial_windows(self,binary_warped):
         # Find our lane pixels first
         leftx, lefty, rightx, righty, out_img = find_lane_pixels(binary_warped)
         self.lane_left.update_fit(leftx, lefty)
         self.lane_right.update_fit(rightx, righty)
 
+    # Use previously found polynomials to search for activated pixel in its vicinity 
     def search_around_polynomial(self,binary_warped,lane):
         # Grab activated pixels
         nonzero = binary_warped.nonzero()
@@ -193,7 +204,8 @@ class lane_detection:
             lane.update_fit(lanex,laney)
         else:
             lane.error_frames += 1
-
+    
+    # This function is used to visualize the best fit polynomials on the warped image
     def visualize_polynomials(self, binary_warped):    
         result =  np.zeros((binary_warped.shape[0],binary_warped.shape[1],3), np.uint8)
         # Generate x and y values for plotting
@@ -214,6 +226,7 @@ class lane_detection:
         # Plot the polynomial lines onto the image
         return result
 
+    # Display some diagnostics
     def display_data(self, lane):
         img = np.zeros((200,500,3), np.uint8)
 
@@ -231,44 +244,49 @@ class lane_detection:
         txt3 = "Error Frames: " + str(lane.error_frames)
         cv2.putText(img,txt3,(10, 120), cv2.FONT_HERSHEY_TRIPLEX, 0.8, (255, 255, 255), 1)
         return img
-    
 
-    def initial_pipeline(self, img):
-        warped_undist=cv2.warpPerspective(img, self.warp_matrix, img.shape[1::-1], flags=cv2.INTER_LINEAR)
-        gray = self.grayscale(img)
-        blur = gaussian_blur(gray,3)
-        sobel_filtered = self.sobel_filter(blur)
-        hsv_color_mask = self.hsv_color_filter(img)
-        filtered = cv2.addWeighted(sobel_filtered,0.5,hsv_color_mask,0.5,0)
-        warped = cv2.warpPerspective(filtered, self.warp_matrix, filtered.shape[1::-1], flags=cv2.INTER_LINEAR)
-        self.fit_polynomial_windows(warped)
-        return warped
-
+    # Complete image processing pipeline
     def image_pipeline(self, img):
+        # Undistort the image
         undist = self.undistort(img)
-        warped_undist=cv2.warpPerspective(undist, self.warp_matrix, img.shape[1::-1], flags=cv2.INTER_LINEAR)
+        # Convert to grayscale with an appropriate mix of color channels
         gray = self.grayscale(undist)
+        # Gaussian blur
         blur = gaussian_blur(gray,3)
+        # Sobel filter the blurred grayscale image
         sobel_filtered = self.sobel_filter(blur)
+
+        # HSV color mask on the original image
         hsv_color_mask = self.hsv_color_filter(undist)
+
+        # weighted average of the two filters
         filtered = cv2.addWeighted(sobel_filtered,0.5,hsv_color_mask,0.5,0)
+        # warp the filtered image
         warped = cv2.warpPerspective(filtered, self.warp_matrix, filtered.shape[1::-1], flags=cv2.INTER_LINEAR)
-        if (self.lane_left.line_base_pos>0.0):
-            self.lane_left.degradation = 0
-        if (self.lane_right.line_base_pos<0.0):
-            self.lane_right.degradation = 0
-        if (self.lane_left.degradation < 2 or self.lane_right.degradation < 2 ):
-            self.fit_polynomial_windows(warped)
+
+        # choose fitting algorithm based on degradation
         if (self.lane_left.degradation > 1):
             self.search_around_polynomial(warped,self.lane_left)
         if (self.lane_right.degradation > 1):
             self.search_around_polynomial(warped,self.lane_right)
+        if (self.lane_left.degradation < 2 or self.lane_right.degradation < 2 ):
+            self.fit_polynomial_windows(warped)
+
+        # sanity check for left and right lane (left lane should not be right of ego position and vice versa)
+        if (self.lane_left.line_base_pos>0.0):
+            self.lane_left.degradation = 0
+        if (self.lane_right.line_base_pos<0.0):
+            self.lane_right.degradation = 0
+
+        # visualize the polynomial
         poly_img = self.visualize_polynomials(warped)
+        # Reverse the warp
         img_reverse = cv2.warpPerspective(poly_img, self.warp_matrix, poly_img.shape[1::-1], flags=cv2.INTER_LINEAR+cv2.WARP_INVERSE_MAP)
 
-        ## filtered_colored = cv2.cvtColor(filtered, cv2.COLOR_GRAY2RGB);
-        ##result = cv2.addWeighted(filtered_colored,1 , img_reverse, 0.5,0)
+        # Add the back-warped image to the undistorted original image
         result = cv2.addWeighted(undist,1 , img_reverse, 0.5,0)
+
+        # Display Diagnostics
         left_text = self.display_data(self.lane_left)
         right_text = self.display_data(self.lane_right)
         box_offset = 20
@@ -276,5 +294,4 @@ class lane_detection:
         overlay_right = cv2.addWeighted(result[box_offset:box_offset+right_text.shape[0],result.shape[1]-box_offset-right_text.shape[1]:result.shape[1]-box_offset],0.5 , right_text, 0.7,0)
         result[box_offset:box_offset+left_text.shape[0],box_offset:box_offset+left_text.shape[1]] = overlay_left
         result[box_offset:box_offset+right_text.shape[0],result.shape[1]-box_offset-right_text.shape[1]:result.shape[1]-box_offset] = overlay_right
-        ##self.compute_curvature()
         return result
