@@ -162,7 +162,7 @@ class lane_detection:
     def grayscale(self, img):
         hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
         ret = cv2.addWeighted(hls[:,:,2],0.5,img[:,:,0],0.5,0)
-        return hls[:,:,2]
+        return ret
 
     # HSV Color filter filters for white and yellowish pixels
     def hsv_color_filter(self, img):
@@ -232,17 +232,23 @@ class lane_detection:
 
         if (lane.degradation == 0):
             color_box = (188,0,0)
+            text_color = (255, 255, 255)
         elif (lane.degradation == 1):
-            color_box = (217,217,0)
+            color_box = (217,217,80)
+            text_color = (0, 0, 0)
         else:
             color_box = (60,179,113)
+            text_color = (255, 255, 255)
         img[2:-2,2:-2]=color_box
-        txt1 = "Curvature Radius: " + str(round(lane.radius_of_curvature,1)) + " m"
-        cv2.putText(img,txt1,(10, 30), cv2.FONT_HERSHEY_TRIPLEX, 0.8, (255, 255, 255), 1)
+        if np.abs(lane.radius_of_curvature)<5000:
+            txt1 = "Curvature Radius: " + str(round(lane.radius_of_curvature,1)) + " m"
+        else:
+            txt1 = "Curvature Radius: inf m"
+        cv2.putText(img,txt1,(10, 30), cv2.FONT_HERSHEY_TRIPLEX, 0.8, text_color, 1)
         txt2 = "Position: " + str(round(lane.line_base_pos,2)) + " m"
-        cv2.putText(img,txt2,(10, 60), cv2.FONT_HERSHEY_TRIPLEX, 0.8, (255, 255, 255), 1)
+        cv2.putText(img,txt2,(10, 60), cv2.FONT_HERSHEY_TRIPLEX, 0.8, text_color, 1)
         txt3 = "Error Frames: " + str(lane.error_frames)
-        cv2.putText(img,txt3,(10, 120), cv2.FONT_HERSHEY_TRIPLEX, 0.8, (255, 255, 255), 1)
+        cv2.putText(img,txt3,(10, 120), cv2.FONT_HERSHEY_TRIPLEX, 0.8,text_color, 1)
         return img
 
     # Complete image processing pipeline
@@ -260,9 +266,10 @@ class lane_detection:
         hsv_color_mask = self.hsv_color_filter(undist)
 
         # weighted average of the two filters
-        filtered = cv2.addWeighted(sobel_filtered,0.5,hsv_color_mask,0.5,0)
+        binary = np.zeros_like(sobel_filtered)
+        binary[(hsv_color_mask >= 1) & (sobel_filtered >=1)] = 1
         # warp the filtered image
-        warped = cv2.warpPerspective(filtered, self.warp_matrix, filtered.shape[1::-1], flags=cv2.INTER_LINEAR)
+        warped = cv2.warpPerspective(binary, self.warp_matrix, sobel_filtered.shape[1::-1], flags=cv2.INTER_LINEAR)
 
         # choose fitting algorithm based on degradation
         if (self.lane_left.degradation > 1):
@@ -284,7 +291,7 @@ class lane_detection:
         img_reverse = cv2.warpPerspective(poly_img, self.warp_matrix, poly_img.shape[1::-1], flags=cv2.INTER_LINEAR+cv2.WARP_INVERSE_MAP)
 
         # Add the back-warped image to the undistorted original image
-        result = cv2.addWeighted(undist,1 , img_reverse, 0.5,0)
+        result = cv2.addWeighted(undist ,1 , img_reverse, 0.5,0)
 
         # Display Diagnostics
         left_text = self.display_data(self.lane_left)

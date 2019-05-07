@@ -29,7 +29,7 @@ class lane():
         # was the line detected in the last iteration?
         self.degradation = 0 
         # last n fits of the line
-        self.lane_history = deque(maxlen=10)
+        self.lane_history = deque(maxlen=params.ERROR_FRAMES)
         #polynomial coefficients averaged over the last n iterations
         self.best_fit = None  
         #radius of curvature of the line in some units
@@ -41,8 +41,15 @@ class lane():
 
     # Update the fit
     def update_fit(self,pts_x,pts_y):
-        current_fit = np.polyfit(pts_y,pts_x,2)
-        self.update_lane(current_fit)
+        if len(pts_x)>0:
+            current_fit = np.polyfit(pts_y,pts_x,2)
+            self.update_lane(current_fit)
+        elif (self.degradation>0) and (self.error_frames<params.ERROR_FRAMES):
+            self.degradation = 1
+            self.error_frames+=1
+        else:
+            self.degradation =0
+
 
     # Radius of curvature should not be too small and the lane should not be more than 3m away from the car
     def check_plausability(self,radius,position):
@@ -53,7 +60,7 @@ class lane():
 
     # Check new fit against last best fit by comparing the curvature and the base position
     def check_relative_plausability(self,radius,position):
-        if self.check_plausability(radius,position) and np.abs(self.radius_of_curvature)/(np.abs(1/self.radius_of_curvature-1/radius)<params.CURVATURE_MARGIN_REL) and (np.abs(self.line_base_pos-position)<params.POSITION_MARGIN):
+        if self.check_plausability(radius,position) and 1/(np.abs(self.radius_of_curvature)*(np.abs(1/self.radius_of_curvature-1/radius))<params.CURVATURE_MARGIN_REL) and (np.abs(self.line_base_pos-position)<params.POSITION_MARGIN):
             return True
         else:
             return False
@@ -69,7 +76,7 @@ class lane():
     def update_lane(self,fit):
         radius_of_curvature, line_base_pos = compute_curvature_and_position(fit)
         # If there are too many error frames the lane is degraded
-        if (self.error_frames==10) or (self.degradation ==1 and self.error_frames>len(self.lane_history)):
+        if (self.error_frames==params.ERROR_FRAMES) or (self.degradation ==1 and self.error_frames>len(self.lane_history)):
             self.degradation = 0
         # If the lane is degraded, the fit is reset (if it is plausible)
         if (self.degradation == 0):
